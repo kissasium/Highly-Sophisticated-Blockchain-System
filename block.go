@@ -54,6 +54,13 @@ import (
 	"time"
 )
 
+// type of validator
+type Validator struct {
+	ID        string
+	PublicKey string
+	Power     int // Voting power
+}
+
 // Transaction represents a single transaction in the block
 type Transaction struct {
 	Sender    string
@@ -73,16 +80,28 @@ type Block struct {
 	MerkleTree   *MerkleTree // Merkle tree of transactions
 	PrevHash     string
 	Hash         string
-	ShardID      int // For AMF integration
+	ShardID      int   // For AMF integration
+	Nonce        int64 // Nonce for Proof of Work
 }
 
 // calculateHash generates a SHA-256 hash for the block
 func calculateHash(block Block) string {
-	record := fmt.Sprintf("%d%s%s%s", block.Index, block.Timestamp, block.MerkleRoot, block.PrevHash)
+	record := fmt.Sprintf("%d%s%s%s%d", block.Index, block.Timestamp, block.MerkleRoot, block.PrevHash, block.Nonce)
 	hash := sha256.New()
 	hash.Write([]byte(record))
 	hashed := hash.Sum(nil)
 	return hex.EncodeToString(hashed)
+}
+func generateBlockHash(block Block) string {
+	// Convert block fields to a string (the order of fields is important)
+	blockData := fmt.Sprintf("%d%s%s%d%v",
+		block.Index, block.Timestamp, block.PrevHash, block.Nonce, block.Transactions)
+
+	// Generate hash using SHA-256
+	hash := sha256.Sum256([]byte(blockData))
+
+	// Return the resulting hash as a string
+	return fmt.Sprintf("%x", hash)
 }
 
 // generateGenesisBlock creates the first block in the blockchain
@@ -117,30 +136,38 @@ func generateGenesisBlock() Block {
 	genesis.Hash = calculateHash(genesis)
 	return genesis
 }
+func isValidBlockHash(hash string) bool {
+	// For example, check if the hash starts with "0000"
+	return hash[:4] == "0000"
+}
 
 // generateNextBlock creates the next block using the previous block
-func generateNextBlock(prevBlock Block, transactions []Transaction) Block {
-	// Convert transactions to data for Merkle Tree
+// generateNextBlock creates the next block using the previous block, WITHOUT mining
+func generateNextBlock(previousBlock Block, transactions []Transaction) Block {
+	newIndex := previousBlock.Index + 1
+	newTimestamp := time.Now().String()
+	previousHash := previousBlock.Hash
+
+	newBlock := Block{
+		Index:        newIndex,
+		Timestamp:    newTimestamp,
+		PrevHash:     previousHash,
+		Transactions: transactions,
+		Nonce:        0, // start with nonce 0
+	}
+
+	// Create Merkle Tree and Root
 	var txData [][]byte
 	for _, tx := range transactions {
 		txData = append(txData, []byte(fmt.Sprintf("%v", tx)))
 	}
-
-	// Create Merkle Tree
 	merkleTree, _ := NewMerkleTree(txData)
-	merkleRoot := merkleTree.GetRootHash()
+	newBlock.MerkleTree = merkleTree
+	newBlock.MerkleRoot = merkleTree.GetRootHash()
 
-	newBlock := Block{
-		Index:        prevBlock.Index + 1,
-		Timestamp:    time.Now().String(),
-		Transactions: transactions,
-		MerkleRoot:   merkleRoot,
-		MerkleTree:   merkleTree,
-		PrevHash:     prevBlock.Hash,
-		ShardID:      prevBlock.ShardID, // Inherit shard ID by default
-	}
-
+	// Initial hash (with nonce = 0, usually invalid)
 	newBlock.Hash = calculateHash(newBlock)
+
 	return newBlock
 }
 
@@ -184,7 +211,21 @@ func (block Block) String() string {
 	sb.WriteString(fmt.Sprintf("PrevHash: %s\n", block.Hash))
 	sb.WriteString(fmt.Sprintf("Hash: %s\n", block.Hash))
 	sb.WriteString(fmt.Sprintf("ShardID: %d\n", block.ShardID))
+	sb.WriteString(fmt.Sprintf("Nonce: %d\n", block.Nonce))
 	sb.WriteString(fmt.Sprintf("Transactions: %d\n", len(block.Transactions)))
 
 	return sb.String()
+}
+
+// mineBlock attempts to find the correct nonce for the block to satisfy the difficulty target
+func (block *Block) mineBlock(difficulty int) {
+	prefix := strings.Repeat("0", difficulty) // Difficulty level: Number of leading zeros
+	for {
+		block.Nonce++
+		block.Hash = calculateHash(*block)
+		if strings.HasPrefix(block.Hash, prefix) {
+			fmt.Printf("Block mined! Nonce: %d\n", block.Nonce)
+			break
+		}
+	}
 }
