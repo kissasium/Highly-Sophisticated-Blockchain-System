@@ -47,6 +47,7 @@
 package main
 
 import (
+	"crypto/ecdsa"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -56,9 +57,11 @@ import (
 
 // type of validator
 type Validator struct {
-	ID        string
-	PublicKey string
-	Power     int // Voting power
+	ID           string
+	PublicKey    string
+	PrivateKey   *ecdsa.PrivateKey
+	PublicKeyObj *ecdsa.PublicKey
+	Power        int
 }
 
 // Transaction represents a single transaction in the block
@@ -227,5 +230,38 @@ func (block *Block) mineBlock(difficulty int) {
 			fmt.Printf("Block mined! Nonce: %d\n", block.Nonce)
 			break
 		}
+	}
+}
+
+// AuthenticateValidator checks if a validator is authorized (basic simulation)
+func AuthenticateValidator(validator Validator, message, signature string) bool {
+	// In a real blockchain, you would verify the signature against the public key.
+	// Here, we'll simulate it by checking if the signature is just "VALID:"+validator.ID
+	expectedSignature := "VALID:" + validator.ID
+	return signature == expectedSignature
+}
+
+// ValidatorReputation stores reputation scores for validators
+var ValidatorReputation = make(map[string]float64)
+
+// UpdateValidatorReputation adjusts reputation based on behavior
+func UpdateValidatorReputation(validatorID string, delta float64) {
+	ValidatorReputation[validatorID] += delta
+	if ValidatorReputation[validatorID] < 0 {
+		ValidatorReputation[validatorID] = 0 // No negative reputation
+	}
+}
+
+// GetValidatorReputation returns the current reputation score
+func GetValidatorReputation(validatorID string) float64 {
+	return ValidatorReputation[validatorID]
+}
+
+// HandleValidatorAction updates reputation based on whether the validator acted correctly
+func HandleValidatorAction(validatorID string, success bool) {
+	if success {
+		UpdateValidatorReputation(validatorID, 1.0) // Reward good behavior
+	} else {
+		UpdateValidatorReputation(validatorID, -2.0) // Penalize bad behavior more harshly
 	}
 }

@@ -200,238 +200,198 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
-	"math/rand"
+	"math/big"
+	mathrand "math/rand"
 	"time"
 )
 
+// ===== Init =====
+
 func init() {
-	rand.Seed(time.Now().UnixNano())
+	mathrand.Seed(time.Now().UnixNano())
 }
 
-// ===== Helper Functions =====
+// ===== Key Functions =====
 
-// SimulateConsensusVote simulates validators voting on a block
+func GenerateKeyPair() (*ecdsa.PrivateKey, string, *ecdsa.PublicKey, error) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	pubBytes, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	pubPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: pubBytes,
+	})
+	return priv, string(pubPEM), &priv.PublicKey, nil
+}
+
+func SignBlock(priv *ecdsa.PrivateKey, block Block) ([]byte, []byte, error) {
+	hash := sha256.Sum256([]byte(block.Hash))
+	r, s, err := ecdsa.Sign(rand.Reader, priv, hash[:])
+	if err != nil {
+		return nil, nil, err
+	}
+	return r.Bytes(), s.Bytes(), nil
+}
+
+func VerifySignature(pub *ecdsa.PublicKey, block Block, rBytes, sBytes []byte) bool {
+	hash := sha256.Sum256([]byte(block.Hash))
+	var r, s big.Int
+	r.SetBytes(rBytes)
+	s.SetBytes(sBytes)
+	return ecdsa.Verify(pub, hash[:], &r, &s)
+}
+
 func SimulateConsensusVote(validators []Validator, block Block) bool {
-	votes := 0
-	total := len(validators)
+	yesVotes := 0
+	fmt.Println("\n=== VALIDATOR VOTING ===")
 
 	for _, v := range validators {
-		if simulateValidatorVote(v, block, total) {
-			votes++
+		// Simulate signature generation
+		r, s, err := SignBlock(v.PrivateKey, block)
+		if err != nil {
+			fmt.Printf("❌ %s: Failed to sign block - %v\n", v.ID, err)
+			continue
 		}
-	}
-	requiredVotes := (2*total)/total + 1
-	fmt.Printf("Consensus votes: %d/%d (required: %d)\n", votes, total, requiredVotes)
-	return votes >= requiredVotes
-}
 
-// simulateValidatorVote simulates a validator approving a block
-func simulateValidatorVote(v Validator, block Block, totalValidators int) bool {
-	votes := 0
-	requiredVotes := (2*totalValidators)/totalValidators + 1
-
-	for i := 0; i < totalValidators; i++ {
-		chance := rand.Intn(10)
-		if chance >= 2 {
-			votes++
+		// Simulate signature verification
+		isValid := VerifySignature(v.PublicKeyObj, block, r, s)
+		if isValid {
+			fmt.Printf("✅ %s: Voted YES (Signature Verified)\n", v.ID)
+			yesVotes++
+		} else {
+			fmt.Printf("❌ %s: Voted NO (Signature Invalid)\n", v.ID)
 		}
 	}
 
-	return votes >= requiredVotes
+	requiredVotes := len(validators)*2/3 + 1
+	fmt.Printf("🧮 YES Votes: %d / %d (Required: %d)\n", yesVotes, len(validators), requiredVotes)
+
+	return yesVotes >= requiredVotes
 }
 
-// createTransactions generates demo transactions
+func simulateValidatorVote(v Validator, block Block) bool {
+	r, s, err := SignBlock(v.PrivateKey, block)
+	if err != nil {
+		fmt.Printf("  Error signing by %s: %v\n", v.ID, err)
+		return false
+	}
+	valid := VerifySignature(v.PublicKeyObj, block, r, s)
+	if !valid {
+		fmt.Printf("  ❌ Invalid signature by %s\n", v.ID)
+	}
+	return valid
+}
+
 func createTransactions() []Transaction {
 	return []Transaction{
-		{Sender: "Alice", Recipient: "Bob", Amount: 10.0, Data: "Payment", Timestamp: time.Now().String(), Signature: "signature1"},
-		{Sender: "Charlie", Recipient: "Dave", Amount: 5.5, Data: "Loan", Timestamp: time.Now().String(), Signature: "signature2"},
+		{Sender: "Alice", Recipient: "Bob", Amount: 10.0, Data: "Payment", Timestamp: time.Now().String(), Signature: "sig1"},
+		{Sender: "Charlie", Recipient: "Dave", Amount: 5.5, Data: "Loan", Timestamp: time.Now().String(), Signature: "sig2"},
 	}
 }
 
-// printBlockInfo prints detailed block information
 func printBlockInfo(block Block) {
 	fmt.Printf("\nBlock #%d\n", block.Index)
 	fmt.Printf("  Timestamp: %s\n", block.Timestamp)
 	fmt.Printf("  Previous Hash: %s\n", block.PrevHash)
 	fmt.Printf("  Current Hash: %s\n", block.Hash)
-	fmt.Printf("  Merkle Root: %s\n", block.MerkleRoot)
 	fmt.Printf("  Number of Transactions: %d\n", len(block.Transactions))
 	fmt.Printf("  Nonce: %d\n", block.Nonce)
-
 	if VerifyBlockIntegrity(block) {
-		fmt.Println("  Block Integrity: VALID")
+		fmt.Println("  ✅ Block Integrity: VALID")
 	} else {
-		fmt.Println("  Block Integrity: INVALID")
+		fmt.Println("  ❌ Block Integrity: INVALID")
 	}
 }
 
-// ===== Main Function =====
+// ===== Main =====
 
 func main() {
-	// ========== PART 1: Validator Consensus Simulation ==========
-
 	fmt.Println("\n=== VALIDATOR CONSENSUS DEMO ===")
-	validators := []Validator{
-		{ID: "Validator1", PublicKey: "pubKey1", Power: 1},
-		{ID: "Validator2", PublicKey: "pubKey2", Power: 1},
-		{ID: "Validator3", PublicKey: "pubKey3", Power: 1},
-		{ID: "Validator4", PublicKey: "pubKey4", Power: 1},
+
+	var validators []Validator
+	for i := 1; i <= 4; i++ {
+		priv, pubStr, pubObj, err := GenerateKeyPair()
+		if err != nil {
+			fmt.Printf("Error generating key for validator %d: %v\n", i, err)
+			continue
+		}
+		validators = append(validators, Validator{
+			ID:           fmt.Sprintf("Validator%d", i),
+			PublicKey:    pubStr,
+			PrivateKey:   priv,
+			PublicKeyObj: pubObj,
+			Power:        1,
+		})
 	}
 
 	var blockchain []Block
-
-	// Step 1: Create genesis block
 	genesisBlock := generateGenesisBlock()
 	blockchain = append(blockchain, genesisBlock)
 
-	// Step 2: Initialize Adaptive Merkle Forest
 	amf := NewAdaptiveMerkleForest(100, 10)
+	_ = amf.AddShard(0, [][]byte{[]byte(fmt.Sprintf("%v", genesisBlock.Transactions))})
 
-	// Step 3: Add genesis block transactions to AMF
-	genesisTxData := [][]byte{[]byte(fmt.Sprintf("%v", genesisBlock.Transactions))}
-	if err := amf.AddShard(0, genesisTxData); err != nil {
-		fmt.Printf("Error adding genesis shard: %v\n", err)
-	}
-
-	// Step 4: Create transactions for next block
 	newTransactions := createTransactions()
-
-	// Step 5: Generate new block
 	difficulty := 1
 	newBlock := generateNextBlock(blockchain[len(blockchain)-1], newTransactions)
 	newBlock.mineBlock(difficulty)
 
-	// Step 6: Simulate consensus voting
 	if SimulateConsensusVote(validators, newBlock) {
-		fmt.Println("Consensus Reached: Block Approved ✅")
+		fmt.Println("✅ Consensus Reached: Block Approved")
 		blockchain = append(blockchain, newBlock)
 
-		// Add transactions to AMF
 		var txData [][]byte
 		for _, tx := range newTransactions {
 			txData = append(txData, []byte(fmt.Sprintf("%v", tx)))
 		}
-		if err := amf.AddShard(1, txData); err != nil {
-			fmt.Printf("Error adding block 1 shard: %v\n", err)
-		}
+		_ = amf.AddShard(1, txData)
 	} else {
-		fmt.Println("Consensus Failed: Block Rejected ❌")
-		// Block is discarded
+		fmt.Println("❌ Consensus Failed: Block Rejected")
 	}
 
-	// Step 7: Display blockchain state
 	fmt.Println("\n=== BLOCKCHAIN STATE ===")
 	for _, block := range blockchain {
 		printBlockInfo(block)
 	}
 
-	// Step 8: Display AMF state
 	fmt.Println("\n=== ADAPTIVE MERKLE FOREST STATE ===")
-	rootHashes := amf.GetShardRootHashes()
-	for shardID, rootHash := range rootHashes {
+	for shardID, rootHash := range amf.GetShardRootHashes() {
 		fmt.Printf("  Shard #%d Root Hash: %s\n", shardID, rootHash)
 	}
 
-	// ========== Adaptive Merkle Forest Operations ==========
+	// Demo: Cross-shard & compressed proof
+	fmt.Println("\n=== PROOF DEMO ===")
+	txData := []byte(fmt.Sprintf("%v", newTransactions[0]))
 
-	fmt.Println("\n\n===AMF OPERATIONS DEMO ===")
-
-	// Create additional transactions
-	tx1 := Transaction{
-		Sender:    "Alice",
-		Recipient: "Bob",
-		Amount:    10.0,
-		Data:      "Payment for services",
-		Timestamp: time.Now().String(),
-		Signature: "signature1",
-	}
-
-	tx2 := Transaction{
-		Sender:    "Charlie",
-		Recipient: "Dave",
-		Amount:    5.5,
-		Data:      "Loan repayment",
-		Timestamp: time.Now().String(),
-		Signature: "signature2",
-	}
-
-	tx3 := Transaction{
-		Sender:    "Eve",
-		Recipient: "Frank",
-		Amount:    25.0,
-		Data:      "Investment",
-		Timestamp: time.Now().String(),
-		Signature: "signature3",
-	}
-
-	tx4 := Transaction{
-		Sender:    "Grace",
-		Recipient: "Heidi",
-		Amount:    12.3,
-		Data:      "Monthly subscription",
-		Timestamp: time.Now().String(),
-		Signature: "signature4",
-	}
-
-	tx5 := Transaction{
-		Sender:    "Ivan",
-		Recipient: "Julia",
-		Amount:    7.8,
-		Data:      "Birthday gift",
-		Timestamp: time.Now().String(),
-		Signature: "signature5",
-	}
-
-	// Create blocks
-	block1 := generateNextBlock(blockchain[len(blockchain)-1], []Transaction{tx1, tx2})
-	blockchain = append(blockchain, block1)
-
-	block2 := generateNextBlock(blockchain[len(blockchain)-1], []Transaction{tx3, tx4, tx5})
-	blockchain = append(blockchain, block2)
-
-	// Add new transactions to AMF
-	transactionsData := [][]byte{
-		[]byte(fmt.Sprintf("%v", tx1)),
-		[]byte(fmt.Sprintf("%v", tx2)),
-	}
-	if err := amf.AddShard(2, transactionsData); err != nil {
-		fmt.Printf("Error adding to shard 2: %v\n", err)
-	}
-
-	transactionsData = [][]byte{
-		[]byte(fmt.Sprintf("%v", tx3)),
-		[]byte(fmt.Sprintf("%v", tx4)),
-		[]byte(fmt.Sprintf("%v", tx5)),
-	}
-	if err := amf.AddShard(3, transactionsData); err != nil {
-		fmt.Printf("Error adding to shard 3: %v\n", err)
-	}
-
-	// Demonstrate cross-shard proof
-	fmt.Println("\nGenerating Cross-Shard Proof:")
-	txData := []byte(fmt.Sprintf("%v", tx1))
-	crossProof, err := amf.GenerateCrossShardProof(0, 2, txData)
+	crossProof, err := amf.GenerateCrossShardProof(0, 1, txData)
 	if err != nil {
-		fmt.Printf("  Error: %v\n", err)
+		fmt.Printf("  ❌ Cross-shard proof error: %v\n", err)
 	} else {
-		fmt.Printf("  Cross-shard proof generated: %d elements\n", len(crossProof))
+		fmt.Printf("  ✅ Cross-shard proof generated (%d elements)\n", len(crossProof))
 	}
 
-	// Demonstrate compressed proof
-	fmt.Println("\nGenerating Compressed Proof:")
-	compressedProof, err := amf.GetCompressedProof(2, txData)
+	compressed, err := amf.GetCompressedProof(1, txData)
 	if err != nil {
-		fmt.Printf("  Error: %v\n", err)
+		fmt.Printf("  ❌ Compressed proof error: %v\n", err)
 	} else {
-		fmt.Printf("  Compressed proof: %s\n", hex.EncodeToString(compressedProof))
-
-		// Verify compressed proof
-		if amf.VerifyCompressedProof(2, txData, compressedProof) {
-			fmt.Println("  Compressed proof verification: VALID")
+		fmt.Printf("  ✅ Compressed proof: %s\n", hex.EncodeToString(compressed))
+		if amf.VerifyCompressedProof(1, txData, compressed) {
+			fmt.Println("  ✅ Compressed proof verification: VALID")
 		} else {
-			fmt.Println("  Compressed proof verification: INVALID")
+			fmt.Println("  ❌ Compressed proof verification: INVALID")
 		}
 	}
 }
