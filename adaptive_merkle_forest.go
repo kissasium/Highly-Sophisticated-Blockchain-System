@@ -285,13 +285,11 @@ func (amf *AdaptiveMerkleForest) VerifyCompressedProof(shardID int, data []byte,
 		return false
 	}
 
-	// Generate standard proof for comparison
 	proof, err := tree.GenerateMerkleProof(data)
 	if err != nil {
 		return false
 	}
 
-	// Apply the same compression algorithm
 	var compressed []byte
 	for _, element := range proof {
 		compressed = append(compressed, element...)
@@ -301,7 +299,6 @@ func (amf *AdaptiveMerkleForest) VerifyCompressedProof(shardID int, data []byte,
 	return hex.EncodeToString(hash[:]) == hex.EncodeToString(compressedProof)
 }
 
-// GetShardRootHashes returns all shard root hashes for the forest
 func (amf *AdaptiveMerkleForest) GetShardRootHashes() map[int]string {
 	amf.mutex.RLock()
 	defer amf.mutex.RUnlock()
