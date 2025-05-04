@@ -85,6 +85,7 @@ type Block struct {
 	Hash         string
 	ShardID      int   // For AMF integration
 	Nonce        int64 // Nonce for Proof of Work
+	Metadata     string
 }
 
 // calculateHash generates a SHA-256 hash for the block
